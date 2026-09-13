@@ -298,10 +298,18 @@ def verify(root: Path) -> None:
                 "a word and its utterance agree on who was speaking",
                 bool((joined.person_w == joined.person_u).all()),
             )
+            # Compared with a tolerance because these columns are rounded to
+            # the millisecond on the way out, while the match was made on the
+            # unrounded times. A word whose midpoint lands exactly on a
+            # boundary -- the last word of a turn ending as it ends -- is
+            # inside before rounding and a hair outside after, and calling
+            # that a misfiled word would be reporting the file format.
+            tolerance = 0.002
+            mid = (joined.start_s_w + joined.end_s_w) / 2
             outside = joined[
                 ~(
-                    (joined.start_s_u <= (joined.start_s_w + joined.end_s_w) / 2)
-                    & ((joined.start_s_w + joined.end_s_w) / 2 < joined.end_s_u)
+                    (joined.start_s_u - tolerance <= mid)
+                    & (mid <= joined.end_s_u + tolerance)
                 )
             ]
             check(
