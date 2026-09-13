@@ -418,8 +418,16 @@ def transcript_words_table(session_id: str, context: AnalysisContext) -> pd.Data
     ``utterance_index`` joins each word to its row in ``transcript.csv``. A
     word matches an utterance only when it falls inside that utterance's own
     speech, so a word is never filed under a turn that merely surrounds it.
-    Words that match nothing -- speech the turn builder did not keep -- are
-    left unjoined rather than attached to the nearest thing.
+    Words that match nothing -- recognized in a stretch that voice activity
+    detection did not mark as speech, and typically the least confident ones
+    -- are left unjoined rather than attached to the nearest thing.
+
+    That is why ``word_count`` in ``counts.csv`` is larger than the words in
+    this file that carry an utterance: the count is every word the recognizer
+    produced for that person, while the utterance texts contain only the words
+    that landed inside a detected speech unit. Both are right answers to
+    slightly different questions, and this file is what lets either be
+    computed.
     """
     transcript = context.transcript
     if transcript is None or not transcript.words:

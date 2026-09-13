@@ -318,6 +318,37 @@ def verify(root: Path) -> None:
                 bool((joined[joined.turn_index_w.notna()].kind == "turn").all()),
             )
 
+            # The two files must agree about how many words each utterance
+            # contains. This is the check that would catch a word attributed
+            # to the wrong row: a misfiled word leaves one utterance short and
+            # another long while every total stays right.
+            counted = (
+                words.dropna(subset=["utterance_index"])
+                .groupby(["session_id", "utterance_index"]).size().rename("joined")
+            )
+            merged = transcript.join(
+                counted, on=["session_id", "utterance_index"]
+            ).fillna({"joined": 0})
+            off = merged[merged.n_words != merged.joined]
+            check(
+                "each utterance's n_words equals its rows in the words file",
+                off.empty,
+                "\n".join(
+                    f"{r.session_id} utterance {int(r.utterance_index)} "
+                    f"({r.kind}): n_words {int(r.n_words)}, "
+                    f"word rows {int(r.joined)}"
+                    for _, r in off.head(5).iterrows()
+                ),
+            )
+            check(
+                "words joined to utterances never exceed word_count",
+                bool(
+                    words.dropna(subset=["utterance_index"])
+                    .groupby(["session_id", "person"]).size().sum()
+                    <= len(words)
+                ),
+            )
+
     # -- counts against the tables they were derived from ---------------
     print("\ncounts.csv vs the per-session event tables")
     for measure, table, predicate in (

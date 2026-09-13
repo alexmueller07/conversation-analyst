@@ -390,7 +390,11 @@ _FILE_NOTES: tuple[tuple[str, str, str], ...] = (
      "in the recording."),
     ("transcript_words_all.csv", "One row per word",
      "Start, end and the recognizer's confidence in each word, for counting "
-     "words directly or excluding a badly recognized stretch."),
+     "words directly or excluding a badly recognized stretch. "
+     "<code>utterance_index</code> joins each word to its line in the "
+     "transcript; words recognized outside any detected speech unit stay "
+     "unjoined, which is why <code>word_count</code> is a little larger than "
+     "the words the transcript lines contain."),
     ("measures_all.csv", "Every measure, long format",
      "One row per pair, person and measure. The shape a mixed-effects model "
      "wants; dyadic data needs a random intercept for the pair."),

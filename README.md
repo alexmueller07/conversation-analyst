@@ -313,7 +313,11 @@ attempts that got talked over, each labelled, in the order they happened, with
 a `mm:ss` clock reading for finding the moment in the recording.
 `transcript_words_all.csv` is one row per word, with its start, end and the
 recognizer's confidence in it, for counting words directly or excluding a
-badly recognized stretch instead of trusting it.
+badly recognized stretch instead of trusting it. `utterance_index` joins each
+word to its line in `transcript_all.csv`; a word recognized outside any
+detected speech unit stays unjoined rather than being attached to the nearest
+line, which is why `word_count` — every word the recognizer produced — comes
+out a little larger than the words the transcript lines contain.
 
 **Three conventions to know before analyzing.** A measure that could not be
 computed is a row with an empty value and a stated reason — never a zero, and
