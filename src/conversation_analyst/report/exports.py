@@ -293,14 +293,6 @@ def write_family_tables(directory: str | Path, long: pd.DataFrame) -> dict[str, 
 # ----------------------------------------------------------------------
 
 
-def _mmss(seconds: float) -> str:
-    """A clock reading, for finding the moment in the recording by hand."""
-    if seconds is None or not np.isfinite(seconds):
-        return ""
-    minutes, rest = divmod(float(seconds), 60.0)
-    return f"{int(minutes):02d}:{rest:05.2f}"
-
-
 def _utterances(session_id: str, context: AnalysisContext) -> list[dict]:
     """Every utterance in the order it was said, with the spans it occupies.
 
