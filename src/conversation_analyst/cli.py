@@ -56,7 +56,10 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     output.mkdir(parents=True, exist_ok=True)
     write_codebook(output / "codebook.csv")
 
+    written: dict[str, Path] = {"codebook": output / "codebook.csv"}
     all_long: list[pd.DataFrame] = []
+    all_transcripts: list[pd.DataFrame] = []
+    all_words: list[pd.DataFrame] = []
     summary: list[dict] = []
     entries: list[SessionEntry] = []
 
@@ -108,6 +111,12 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         all_long.append(
             measures_long(session.session_id, result.measures, result.context.metadata)
         )
+        from conversation_analyst.report.exports import (
+            transcript_table, transcript_words_table,
+        )
+
+        all_transcripts.append(transcript_table(session.session_id, result.context))
+        all_words.append(transcript_words_table(session.session_id, result.context))
         available = sum(1 for m in result.measures if m.available)
         elapsed = time.perf_counter() - started
         print(
@@ -164,10 +173,24 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     if all_long:
         combined = pd.concat(all_long, ignore_index=True)
         combined.to_csv(output / "measures_all.csv", index=False)
+        from conversation_analyst.report.exports import write_corpus_exports
         from conversation_analyst.report.tables import measures_wide
 
         measures_wide(combined).to_csv(output / "measures_all_wide.csv", index=False)
         print(f"\nCombined -> {output / 'measures_all.csv'}")
+
+        written["measures_all"] = output / "measures_all.csv"
+
+        exports = write_corpus_exports(
+            output, combined, sessions=summary,
+            transcripts=all_transcripts, words=all_words,
+        )
+        written.update(exports)
+        if "counts" in exports:
+            print(f"Counts per person -> {exports['counts']}")
+        if "transcript_all" in exports:
+            print(f"Transcript -> {exports['transcript_all']}")
+        print(f"One file per measure family -> {output / 'by-measure-family'}")
 
     pd.DataFrame(summary).to_csv(output / "session_summary.csv", index=False)
 
@@ -175,7 +198,8 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     # problem in session five gets missed.
     if entries:
         index = write_corpus_report(
-            output / "index.html", entries, title=Path(args.target).name
+            output / "index.html", entries, title=Path(args.target).name,
+            written=written,
         )
         print(f"\nCorpus report -> {index}")
 

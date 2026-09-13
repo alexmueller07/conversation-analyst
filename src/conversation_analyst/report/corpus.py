@@ -33,7 +33,7 @@ import html
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 
@@ -362,7 +362,91 @@ def _common_warnings(entries: Sequence[SessionEntry]) -> str:
     return "".join(items)
 
 
-def render_corpus_report(entries: Sequence[SessionEntry], title: str = "") -> str:
+_FILE_NOTES: tuple[tuple[str, str, str], ...] = (
+    ("counts.csv", "One row per participant, one column per raw count",
+     "Nods, words, smiles, laughs, questions, backchannels, turns. Join your "
+     "own grouping variable on <code>participant_id</code> and compare groups "
+     "directly. Conversation minutes and speaking seconds are in the same "
+     "file, because a raw count compared across conversations of unequal "
+     "length is a comparison of length."),
+    ("counts_dyad.csv", "Counts that belong to the pair, not to either person",
+     "Shared laughter, mutual gaze episodes, the pair's total turns. Kept "
+     "apart so a single pair-level value does not enter a model twice."),
+    ("counts_long.csv", "The same counts, one row each, with reasons",
+     "Where a count is blank in the wide file, this says why it could not be "
+     "measured. Worth reading before counting rows in a session's "
+     "<code>nods.csv</code> or <code>events.csv</code> instead: those list "
+     "every detection, including ones from a view whose movement measures "
+     "were withheld as unreliable. <code>counts.csv</code> is the file to "
+     "count from."),
+    ("by-measure-family/", "The catalogue split one file per family",
+     "<code>&lt;family&gt;.csv</code> is long, with the columns of "
+     "<code>measures_all.csv</code>; <code>&lt;family&gt;_wide.csv</code> is "
+     "one row per participant. <code>INDEX.csv</code> lists which measures "
+     "are in which file."),
+    ("transcript_all.csv", "What was said, one row per utterance",
+     "Turns, backchannels and attempts that were talked over, each labelled, "
+     "in the order they happened, with a mm:ss reading for finding the moment "
+     "in the recording."),
+    ("transcript_words_all.csv", "One row per word",
+     "Start, end and the recognizer's confidence in each word, for counting "
+     "words directly or excluding a badly recognized stretch. "
+     "<code>utterance_index</code> joins each word to its line in the "
+     "transcript; words recognized outside any detected speech unit stay "
+     "unjoined, which is why <code>word_count</code> is a little larger than "
+     "the words the transcript lines contain."),
+    ("measures_all.csv", "Every measure, long format",
+     "One row per pair, person and measure. The shape a mixed-effects model "
+     "wants; dyadic data needs a random intercept for the pair."),
+    ("codebook.csv", "What every measure means",
+     "Definition, unit, level, interpretation and citations, generated from "
+     "the same registry that computed the values."),
+)
+
+
+def _files(written: Mapping[str, object] | None) -> str:
+    """What is in this folder and which question each file answers.
+
+    People arrive at a results folder, not at this page, and a directory of
+    thirty CSVs says nothing about which one to open. Only files that were
+    actually written are listed: naming a file that is not there sends
+    somebody looking for it.
+    """
+    from conversation_analyst.report.exports import FAMILY_KEY
+
+    # Matched on the keys the writers return rather than on file names: two
+    # different files here are both called counts.csv, and matching on the
+    # name would let one of them vouch for the other.
+    present = {f"{key}.csv" for key in (written or {})}
+    if any(str(key).startswith(FAMILY_KEY) for key in (written or {})):
+        present.add("by-measure-family/")
+
+    rows = []
+    for name, what, detail in _FILE_NOTES:
+        if written is not None and name not in present:
+            continue
+        rows.append(
+            f'<tr><td class="mono"><strong>{_esc(name)}</strong></td>'
+            f"<td>{_esc(what)}<div class=\"desc\" style=\"margin:3px 0 0\">"
+            f"{detail}</div></td></tr>"
+        )
+    if not rows:
+        return ""
+    return (
+        '<p class="desc">Each file answers a different question, so nothing '
+        "has to be reshaped before the first test. An empty cell is always a "
+        "measure that could not be computed &mdash; never a zero.</p>"
+        '<div class="scroll"><table><thead><tr><th>File</th>'
+        "<th>What it is for</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></div>"
+    )
+
+
+def render_corpus_report(
+    entries: Sequence[SessionEntry],
+    title: str = "",
+    written: Mapping[str, object] | None = None,
+) -> str:
     """Build the whole-run HTML document."""
     usable = sum(1 for e in entries if e.verdict in ("pass", "pass_limits", "review"))
     heading = title or "Conversation corpus"
@@ -387,6 +471,9 @@ gets discarded.</p>
 {_session_table(entries)}
 {_common_warnings(entries)}
 
+<h2>What is in this folder</h2>
+{_files(written)}
+
 <h2>What could not be measured</h2>
 {_withheld(entries)}
 
@@ -409,9 +496,12 @@ were not computable and are reported as such rather than as zero.
 
 
 def write_corpus_report(
-    path: str | Path, entries: Sequence[SessionEntry], title: str = ""
+    path: str | Path,
+    entries: Sequence[SessionEntry],
+    title: str = "",
+    written: Mapping[str, object] | None = None,
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_corpus_report(entries, title), encoding="utf-8")
+    path.write_text(render_corpus_report(entries, title, written), encoding="utf-8")
     return path

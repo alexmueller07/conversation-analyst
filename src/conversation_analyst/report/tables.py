@@ -294,4 +294,11 @@ def write_session_tables(
         path.write_text(transcript_text(context), encoding="utf-8")
         written["transcript"] = path
 
+    # Raw counts per person and the transcript as rows. Written here rather
+    # than by each caller so that the CLI and the desktop app can never
+    # produce different sets of files from the same analysis.
+    from conversation_analyst.report.exports import write_session_exports
+
+    written.update(write_session_exports(workspace, session_id, context, long))
+
     return written

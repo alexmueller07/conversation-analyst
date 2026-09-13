@@ -198,6 +198,9 @@ class Worker(threading.Thread):
         from conversation_analyst.report.corpus import SessionEntry, write_corpus_report
         from conversation_analyst.report.dashboard import write_dashboard
         from conversation_analyst.report.qc import VERDICT_LABELS, assess_quality
+        from conversation_analyst.report.exports import (
+            transcript_table, transcript_words_table, write_corpus_exports,
+        )
         from conversation_analyst.report.tables import measures_long, measures_wide, write_session_tables
         from conversation_analyst.session import iter_sessions
 
@@ -239,7 +242,10 @@ class Worker(threading.Thread):
         output.mkdir(parents=True, exist_ok=True)
         write_codebook(output / "codebook.csv")
 
+        written: dict[str, Any] = {"codebook": output / "codebook.csv"}
         all_long: list[Any] = []
+        all_transcripts: list[Any] = []
+        all_words: list[Any] = []
         summary: list[dict] = []
         entries: list[Any] = []
 
@@ -344,6 +350,8 @@ class Worker(threading.Thread):
             all_long.append(
                 measures_long(session.session_id, result.measures, result.context.metadata)
             )
+            all_transcripts.append(transcript_table(session.session_id, result.context))
+            all_words.append(transcript_words_table(session.session_id, result.context))
             summary.append({
                 "session_id": session.session_id, "verdict": qc.verdict,
                 "duration_s": round(result.context.duration, 1), "n_turns": n_turns,
@@ -356,6 +364,23 @@ class Worker(threading.Thread):
             measures_wide(combined).to_csv(output / "measures_all_wide.csv", index=False)
             self.send("log", "")
             self.send("log", f"Wrote {output / 'measures_all.csv'}", "ok")
+
+            written["measures_all"] = output / "measures_all.csv"
+
+            exports = write_corpus_exports(
+                output, combined, sessions=summary,
+                transcripts=all_transcripts, words=all_words,
+            )
+            written.update(exports)
+            if "counts" in exports:
+                self.send("log", f"Counts per person: {exports['counts']}", "ok")
+            if "transcript_all" in exports:
+                self.send("log", f"Transcript: {exports['transcript_all']}", "ok")
+            self.send(
+                "log",
+                f"One file per measure family: {output / 'by-measure-family'}",
+                "ok",
+            )
         if summary:
             pd.DataFrame(summary).to_csv(output / "session_summary.csv", index=False)
 
@@ -364,7 +389,8 @@ class Worker(threading.Thread):
         # points at once it exists.
         if entries:
             report = write_corpus_report(
-                output / "index.html", entries, title=Path(self.target).name
+                output / "index.html", entries, title=Path(self.target).name,
+                written=written,
             )
             self.send("log", f"Report for all {len(entries)} session(s): {report}", "ok")
             self.send("report", text=str(report))
