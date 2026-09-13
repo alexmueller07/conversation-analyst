@@ -212,19 +212,31 @@ def verify(root: Path) -> None:
             bool(transcript.person.notna().all()
                  and (transcript.duration_s >= 0).all()),
         )
-        overlapping = []
-        for (sess, person), g in transcript.groupby(["session_id", "person"]):
-            turns = g[g.kind == "turn"]
-            others = g[g.kind != "turn"]
-            for _, o in others.iterrows():
-                inside = (turns.start_s <= o.start_s) & (o.end_s <= turns.end_s)
-                if inside.any():
-                    overlapping.append(f"{sess} {person} @{o.start_s}")
-        check(
-            "backchannels are never also inside a turn (no double counting)",
-            not overlapping,
-            "\n".join(overlapping[:8]),
+        # No double counting. A turn spans its own internal pauses, so a short
+        # acknowledgment by the same person can sit inside a turn's extent
+        # while being none of its speech -- comparing extents would flag that
+        # as an overlap when nothing is counted twice. Speech is what must not
+        # be counted twice, so speech is what is compared: the utterances of
+        # one person must not add up to more time than that person spent
+        # speaking.
+        bad = []
+        speech = (
+            transcript.groupby(["session_id", "person"])["speech_s"].sum()
+            if "speech_s" in transcript.columns
+            else pd.Series(dtype=float)
         )
+        for (sess, person), total in speech.items():
+            pid = f"{sess}:{person}"
+            spoken = counts.loc[counts.participant_id == pid, "speaking_time_s"]
+            if spoken.empty or pd.isna(spoken.iloc[0]):
+                continue
+            if total > float(spoken.iloc[0]) * 1.02 + 0.5:
+                bad.append(
+                    f"{pid}: utterances sum to {total:.1f}s of speech, "
+                    f"speaking_time is {float(spoken.iloc[0]):.1f}s"
+                )
+        check("utterances never double-count a person's speech", not bad,
+              "\n".join(bad[:8]))
         # Against each session's own turns.csv.
         bad = []
         for session in sessions:
@@ -270,6 +282,41 @@ def verify(root: Path) -> None:
                     )
         check("word_count equals the rows in the words file", not bad,
               "\n".join(bad[:8]))
+
+        # The join between the two transcript files.
+        if transcript is not None and "utterance_index" in words.columns:
+            joined = words.dropna(subset=["utterance_index"]).merge(
+                transcript, on=["session_id", "utterance_index"],
+                suffixes=("_w", "_u"), how="left",
+            )
+            check(
+                "every word's utterance_index names a real utterance",
+                bool(joined.kind.notna().all()),
+                f"{int(joined.kind.isna().sum())} words point at nothing",
+            )
+            check(
+                "a word and its utterance agree on who was speaking",
+                bool((joined.person_w == joined.person_u).all()),
+            )
+            outside = joined[
+                ~(
+                    (joined.start_s_u <= (joined.start_s_w + joined.end_s_w) / 2)
+                    & ((joined.start_s_w + joined.end_s_w) / 2 < joined.end_s_u)
+                )
+            ]
+            check(
+                "a word always falls inside the utterance it joined",
+                outside.empty,
+                "\n".join(
+                    f"{r.session_id} '{r.word}' @{r.start_s_w} -> utterance "
+                    f"{int(r.utterance_index)} ({r.start_s_u}-{r.end_s_u})"
+                    for _, r in outside.head(5).iterrows()
+                ),
+            )
+            check(
+                "a word filed under a turn belongs to a turn row",
+                bool((joined[joined.turn_index_w.notna()].kind == "turn").all()),
+            )
 
     # -- counts against the tables they were derived from ---------------
     print("\ncounts.csv vs the per-session event tables")

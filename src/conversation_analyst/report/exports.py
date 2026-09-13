@@ -301,19 +301,21 @@ def _mmss(seconds: float) -> str:
     return f"{int(minutes):02d}:{rest:05.2f}"
 
 
-def transcript_table(session_id: str, context: AnalysisContext) -> pd.DataFrame:
-    """Everything said, one row per utterance, in the order it was said.
+def _utterances(session_id: str, context: AnalysisContext) -> list[dict]:
+    """Every utterance in the order it was said, with the spans it occupies.
 
-    ``turns.csv`` holds floor-holding turns only. A conversation is not only
-    its turns: the "mm-hm" that kept the speaker going and the attempt that
-    got talked over are speech, and a transcript that omits them is not the
-    conversation that happened. All three kinds are here, labelled, and they
-    do not overlap -- a backchannel is never also part of a turn -- so the
-    rows can be counted without counting anything twice.
+    The single source of truth behind both transcript tables, so the row a
+    word is attributed to and the row printed in the utterance file cannot
+    disagree. ``_spans`` is the utterance's actual speech, which for a turn is
+    its inter-pausal units rather than its whole extent: a turn spans its own
+    internal pauses, and a short acknowledgment by the same person can sit
+    inside one of those gaps without belonging to the turn. Matching a word on
+    the extent rather than on the units would file that acknowledgment's words
+    under the surrounding turn.
     """
     turn_set = context.turn_set
     if turn_set is None or not (turn_set.turns or turn_set.backchannels):
-        return pd.DataFrame()
+        return []
 
     rows: list[dict] = []
     for turn in turn_set.turns:
@@ -325,12 +327,15 @@ def transcript_table(session_id: str, context: AnalysisContext) -> pd.DataFrame:
                 "start_s": round(float(turn.start), 3),
                 "end_s": round(float(turn.end), 3),
                 "duration_s": round(float(turn.duration), 3),
+                "speech_s": round(float(turn.speech_duration), 3),
                 "n_words": int(turn.n_words),
                 "text": turn.text or "",
                 "turn_index": int(turn.index),
                 "fto_s": None if turn.fto is None else round(float(turn.fto), 3),
                 "prev_person": turn.prev_person or "",
                 "overlap_onset": bool(turn.is_overlap_onset),
+                "_spans": [(float(u.start), float(u.end)) for u in turn.ipus]
+                or [(float(turn.start), float(turn.end))],
             }
         )
     for kind, units in (
@@ -346,69 +351,121 @@ def transcript_table(session_id: str, context: AnalysisContext) -> pd.DataFrame:
                     "start_s": round(float(unit.start), 3),
                     "end_s": round(float(unit.end), 3),
                     "duration_s": round(float(unit.duration), 3),
+                    "speech_s": round(float(unit.duration), 3),
                     "n_words": int(unit.n_words),
                     "text": unit.text or "",
                     "turn_index": None,
                     "fto_s": None,
                     "prev_person": "",
                     "overlap_onset": False,
+                    "_spans": [(float(unit.start), float(unit.end))],
                 }
             )
 
-    frame = pd.DataFrame(rows).sort_values(["start_s", "person"]).reset_index(drop=True)
-    # Nullable integers: a turn index is a label, and a backchannel has none.
-    # Plain floats would write it as "12.0", which reads as a measurement.
+    rows.sort(key=lambda r: (r["start_s"], r["person"]))
+    for index, row in enumerate(rows):
+        row["utterance_index"] = index
+    return rows
+
+
+def _mmss(seconds: float) -> str:
+    """A clock reading, for finding the moment in the recording by hand."""
+    if seconds is None or not np.isfinite(seconds):
+        return ""
+    minutes, rest = divmod(float(seconds), 60.0)
+    return f"{int(minutes):02d}:{rest:05.2f}"
+
+
+TRANSCRIPT_COLUMNS = (
+    "session_id", "utterance_index", "kind", "participant_id", "person",
+    "start_s", "start_mmss", "end_s", "duration_s", "speech_s", "n_words",
+    "text", "turn_index", "fto_s", "prev_person", "overlap_onset",
+)
+
+
+def transcript_table(session_id: str, context: AnalysisContext) -> pd.DataFrame:
+    """Everything said, one row per utterance, in the order it was said.
+
+    ``turns.csv`` holds floor-holding turns only. A conversation is not only
+    its turns: the "mm-hm" that kept the speaker going and the attempt that
+    got talked over are speech, and a transcript that omits them is not the
+    conversation that happened. All three kinds are here, labelled, and no two
+    rows describe the same speech, so they can be counted without counting
+    anything twice.
+    """
+    rows = _utterances(session_id, context)
+    if not rows:
+        return pd.DataFrame()
+
+    for row in rows:
+        row.pop("_spans", None)
+        row["participant_id"] = _participant_id(session_id, row["person"])
+        row["start_mmss"] = _mmss(row["start_s"])
+
+    frame = pd.DataFrame(rows)[list(TRANSCRIPT_COLUMNS)]
     frame["turn_index"] = frame["turn_index"].astype("Int64")
-    frame.insert(1, "utterance_index", range(len(frame)))
-    frame.insert(
-        3, "participant_id", [_participant_id(session_id, p) for p in frame["person"]]
-    )
-    frame.insert(6, "start_mmss", [_mmss(t) for t in frame["start_s"]])
     return frame
 
 
 def transcript_words_table(session_id: str, context: AnalysisContext) -> pd.DataFrame:
-    """One row per recognized word, with its timing and confidence.
+    """One row per recognized word, with its timing, confidence and utterance.
 
     The utterance table is for reading; this is for counting. Word counts,
     vocabulary, the exact moment someone said a particular thing, and how sure
     the recognizer was about it all come from here, and the confidence column
     is what lets a badly recognized stretch be excluded rather than trusted.
+
+    ``utterance_index`` joins each word to its row in ``transcript.csv``. A
+    word matches an utterance only when it falls inside that utterance's own
+    speech, so a word is never filed under a turn that merely surrounds it.
+    Words that match nothing -- speech the turn builder did not keep -- are
+    left unjoined rather than attached to the nearest thing.
     """
     transcript = context.transcript
     if transcript is None or not transcript.words:
         return pd.DataFrame()
 
-    turns = list(context.turn_set.turns) if context.turn_set is not None else []
+    by_person: dict[str, list[tuple[float, float, int, str, object]]] = {}
+    for row in _utterances(session_id, context):
+        for start, end in row["_spans"]:
+            by_person.setdefault(row["person"], []).append(
+                (start, end, row["utterance_index"], row["kind"], row["turn_index"])
+            )
+    for spans in by_person.values():
+        spans.sort()
 
-    def turn_of(person: str, start: float, end: float) -> int | None:
+    def locate(person: str, start: float, end: float):
         mid = 0.5 * (start + end)
-        for turn in turns:
-            if turn.person == person and turn.start <= mid < turn.end:
-                return int(turn.index)
-        return None
+        for span_start, span_end, index, kind, turn_index in by_person.get(person, ()):
+            if span_start <= mid < span_end:
+                return index, kind, turn_index
+        return None, "", None
 
-    rows = [
-        {
-            "session_id": session_id,
-            "participant_id": _participant_id(session_id, word.person),
-            "person": word.person,
-            "start_s": round(float(word.start), 3),
-            "end_s": round(float(word.end), 3),
-            "duration_s": round(float(word.duration), 3),
-            "word": word.text,
-            "confidence": round(float(word.probability), 4),
-            "turn_index": turn_of(word.person, word.start, word.end),
-        }
-        for word in sorted(transcript.words, key=lambda w: (w.start, w.person))
-    ]
+    rows = []
+    for word in sorted(transcript.words, key=lambda w: (w.start, w.person)):
+        index, kind, turn_index = locate(word.person, word.start, word.end)
+        rows.append(
+            {
+                "session_id": session_id,
+                "participant_id": _participant_id(session_id, word.person),
+                "person": word.person,
+                "start_s": round(float(word.start), 3),
+                "end_s": round(float(word.end), 3),
+                "duration_s": round(float(word.duration), 3),
+                "word": word.text,
+                "confidence": round(float(word.probability), 4),
+                "utterance_index": index,
+                "utterance_kind": kind,
+                "turn_index": turn_index,
+            }
+        )
     frame = pd.DataFrame(rows)
-    frame["turn_index"] = frame["turn_index"].astype("Int64")
+    for column in ("utterance_index", "turn_index"):
+        frame[column] = frame[column].astype("Int64")
     frame.insert(1, "word_index", range(len(frame)))
     return frame
 
 
-# ----------------------------------------------------------------------
 # Writers
 # ----------------------------------------------------------------------
 

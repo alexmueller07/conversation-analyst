@@ -376,3 +376,82 @@ class TestDuplicateGuard:
                                                                 sessions):
         frame = exports.counts_wide(long, sessions)
         assert len(frame) == 4
+
+
+class TestWordsJoinTheRightUtterance:
+    """A turn spans its own pauses; what sits in a pause is not the turn."""
+
+    @pytest.fixture
+    def pause_context(self, context):
+        """One turn in two units, with the speaker's own "mm-hm" in the gap.
+
+        The gap is real: the turn runs 0-10 s but is only speaking 0-3 and
+        7-10. A short acknowledgment at 4.5 s sits inside the turn's extent
+        and outside its speech, which is exactly the case that files words
+        under the wrong row if the extent is what gets matched.
+        """
+        units = [
+            IPU(person="A", start=0.0, end=3.0, text="so anyway", n_words=2),
+            IPU(person="A", start=7.0, end=10.0, text="that's the thing", n_words=3),
+        ]
+        turn = make_turn(0, "A", 0.0, 10.0, text="so anyway that's the thing",
+                         ipus=units)
+        inner = IPU(person="A", start=4.4, end=4.9, is_backchannel=True,
+                    text="mm hm", n_words=2)
+        context.turn_set = TurnSet(
+            turns=[turn], ipus=units + [inner], backchannels=[inner],
+            duration=20.0,
+            speech={"A": Segments.from_pairs([(0.0, 3.0), (4.4, 4.9), (7.0, 10.0)]),
+                    "B": Segments.empty()},
+        )
+        context.transcript = Transcript(
+            words=[
+                Word("A", 0.2, 0.9, "so", 0.98),
+                Word("A", 1.0, 2.4, "anyway", 0.97),
+                Word("A", 4.5, 4.6, "mm", 0.71),
+                Word("A", 4.65, 4.85, "hm", 0.69),
+                Word("A", 7.2, 7.6, "that's", 0.95),
+                Word("A", 12.0, 12.4, "stray", 0.80),
+            ],
+            model="test",
+        )
+        return context
+
+    def test_a_word_in_the_pause_is_not_filed_under_the_turn(self, pause_context):
+        frame = exports.transcript_words_table("s1", pause_context)
+        mm = frame[frame.word == "mm"].iloc[0]
+        assert pd.isna(mm.turn_index), (
+            "the acknowledgment sits in the turn's pause, not in the turn"
+        )
+        assert mm.utterance_kind == "backchannel"
+
+    def test_a_word_inside_the_turn_is_filed_under_it(self, pause_context):
+        frame = exports.transcript_words_table("s1", pause_context)
+        assert frame[frame.word == "so"].iloc[0].turn_index == 0
+        assert frame[frame.word == "that's"].iloc[0].turn_index == 0
+
+    def test_a_word_matching_nothing_stays_unjoined(self, pause_context):
+        frame = exports.transcript_words_table("s1", pause_context)
+        stray = frame[frame.word == "stray"].iloc[0]
+        assert pd.isna(stray.utterance_index)
+        assert stray.utterance_kind == ""
+
+    def test_utterance_index_joins_the_two_files(self, pause_context):
+        words = exports.transcript_words_table("s1", pause_context)
+        utterances = exports.transcript_table("s1", pause_context)
+        joined = words.dropna(subset=["utterance_index"]).merge(
+            utterances, on=["session_id", "utterance_index"],
+            suffixes=("_w", "_u"),
+        )
+        assert len(joined) == int(words.utterance_index.notna().sum())
+        assert (joined.person_w == joined.person_u).all()
+        assert (joined.utterance_kind == joined.kind).all()
+
+    def test_word_time_falls_inside_the_utterance_it_joined(self, pause_context):
+        words = exports.transcript_words_table("s1", pause_context)
+        utterances = exports.transcript_table("s1", pause_context).set_index(
+            "utterance_index"
+        )
+        for _, w in words.dropna(subset=["utterance_index"]).iterrows():
+            u = utterances.loc[w.utterance_index]
+            assert u.start_s <= 0.5 * (w.start_s + w.end_s) < u.end_s
