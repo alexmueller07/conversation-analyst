@@ -79,6 +79,7 @@ transition:opacity .6s ease,transform .6s ease}
 <nav><div class="wrap">
   <span class="mark">Conversation <em>Analyst</em></span>
   <a href="#measures">Measures</a>
+  <a href="#output">Output</a>
   <a href="#validation">Validation</a>
   <a href="methods.html">Methods</a>
   <a href="#download" class="cta">Download</a>
@@ -146,6 +147,50 @@ transition:opacity .6s ease,transform .6s ease}
     alt="Nods tabulated by cycle length and by speaking/listening role"></div>
 </div></section>
 
+<section id="output"><div class="wrap">
+  <h2>Spreadsheets, not a black box</h2>
+  <p class="lead">Every number leaves as a CSV, in the shape the question is
+  usually asked in. Nothing has to be reshaped before the first test.</p>
+
+  <div class="grid">
+    <div class="card reveal"><span class="k">counts.csv</span>
+      <h3>One row per participant, one column per count</h3>
+      <p>How many nods, words, smiles, laughs, questions, backchannels,
+      interruptions and turns — 30 raw counts, no rates, nothing
+      pre-aggregated. Add a column for whatever groups your participants and
+      the comparison is one line of R.</p></div>
+    <div class="card reveal"><span class="k">By family</span>
+      <h3>The catalogue split one file per family</h3>
+      <p>Head, gaze, prosody, turn-taking, lexical, affect &mdash; 20 files
+      rather than one with 203 measures in it, each in both long and wide
+      form, with an index naming what is in which.</p></div>
+    <div class="card reveal"><span class="k">Transcript</span>
+      <h3>What was said, as rows</h3>
+      <p>One row per utterance with speaker, clock time and text &mdash;
+      including the backchannels and the attempts that got talked over, which
+      a turn table leaves out. And one row per word, with per-word timing and
+      the recognizer's confidence in it.</p></div>
+  </div>
+
+  <pre><code># counts.csv, joined to your own grouping variable
+d &lt;- merge(read.csv("counts.csv"), read.csv("participants.csv"))
+
+t.test(nod_count ~ group, data = d)
+#>  mean in group 1   mean in group 2
+#>             30.4              20.1
+
+# ...and again per minute, because conversation length is in the same file
+t.test(I(nod_count / duration_min) ~ group, data = d)</code></pre>
+
+  <div class="honest"><b>An empty cell is never a zero.</b> A count that could
+  not be measured &mdash; a camera that froze, a view with no face in it &mdash;
+  stays empty, and a companion file states the reason. A participant who did
+  not nod and a participant whose camera failed must not read the same way.
+  Counts that belong to the pair rather than to one person go in their own
+  file instead of being copied onto both rows, so nothing enters a model
+  twice.</div>
+</div></section>
+
 <section id="validation"><div class="wrap">
   <h2>Validated five independent ways</h2>
   <p class="lead">A fitted parameter looks exactly as authoritative as a
@@ -198,10 +243,10 @@ transition:opacity .6s ease,transform .6s ease}
   on your machine — recordings never leave it.</p>
 
   <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:26px">
-    <a class="btn primary" href="downloads/Conversation-Analyst-Setup-1.0.0.exe"
-       download>⊞&nbsp; Download for Windows — v1.0.0 installer</a>
-    <a class="btn ghost" href="downloads/conversation-analyst-1.0.0-source.zip"
-       download>macOS / Linux — v1.0.0 (zip)</a>
+    <a class="btn primary" href="downloads/Conversation-Analyst-Setup-1.1.0.exe"
+       download>⊞&nbsp; Download for Windows — v1.1.0 installer</a>
+    <a class="btn ghost" href="downloads/conversation-analyst-1.1.0-source.zip"
+       download>macOS / Linux — v1.1.0 (zip)</a>
   </div>
 
   <div class="step"><div class="n">1</div><div>
