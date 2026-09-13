@@ -238,14 +238,23 @@ your own machine.
 
 ```
 results/
-├── measures_all.csv        every pair, every measure — this is the one to analyze
+├── counts.csv              one row per participant, one column per raw count —
+│                           nods, words, smiles, laughs, questions, turns
+├── transcript_all.csv      what was said, one row per utterance
+├── transcript_words_all.csv one row per word, with timing and confidence
+├── by-measure-family/      the catalogue split one file per family, long and
+│                           wide, plus INDEX.csv naming what is in each
+├── measures_all.csv        every pair, every measure, long format
 ├── index.html              open this first: every session, what passed,
 │                          what was withheld, and every distribution
 ├── codebook.csv            what all 203 measures mean
+├── counts_dyad.csv         counts that belong to the pair, not to either person
 ├── session_summary.csv     pass / review / fail per pair
 └── dyad012/
     ├── dashboard.html      the visual report
     ├── transcript.txt      the whole conversation, timestamped, for reading
+    ├── tables/counts.csv   this pair's counts, same columns as the corpus file
+    ├── tables/transcript.csv        and transcript_words.csv, for this pair
     ├── tables/turns.csv    every turn, with its text and timing
     ├── tables/events.csv   nods, smiles, laughs, interruptions, callbacks
     ├── tables/nods.csv     one row per nod: cycles, magnitude, speaking or
@@ -256,6 +265,35 @@ results/
 ```
 
 ![The generated report](docs/images/dashboard.png)
+
+## Comparing groups of people
+
+`counts.csv` is the file for "did this group do more of X than that group".
+One row per participant, one column per raw count, and a `participant_id` to
+join a grouping variable onto. Nothing needs reshaping first:
+
+```r
+d <- read.csv("results/counts.csv")
+d <- merge(d, read.csv("my-participants.csv"))   # adds a `group` column
+t.test(nod_count ~ group, data = d)
+aggregate(cbind(nod_count, word_count, smile_count) ~ group, d, mean)
+```
+
+Conversation length rides along in the same file, so the comparison that
+length confounds can be corrected rather than made by accident — and it is
+worth making both ways, because they disagree more often than people expect:
+
+```r
+t.test(I(nod_count / duration_min) ~ group, data = d)
+```
+
+`by-measure-family/` holds the same catalogue split one file per family, so a
+question about head movement opens `head_wide.csv` rather than filtering all
+203 measures. Each family comes in both shapes: `<family>.csv` is long, with
+the columns of `measures_all.csv`, and `<family>_wide.csv` is one row per
+participant. `INDEX.csv` lists which measures are in which file.
+
+## Modelling the pair
 
 `measures_all.csv` is long format — one row per pair, person and measure — so
 it goes straight into a mixed-effects model. Dyadic data is non-independent,
@@ -268,10 +306,27 @@ lat <- subset(d, measure == "response_latency_median" & available)
 summary(lmer(value ~ meta_condition + (1 | session_id), data = lat))
 ```
 
-**Two conventions to know before analyzing.** A measure that could not be
+## Reading what was said
+
+`transcript_all.csv` is one row per utterance — turns, backchannels and
+attempts that got talked over, each labelled, in the order they happened, with
+a `mm:ss` clock reading for finding the moment in the recording.
+`transcript_words_all.csv` is one row per word, with its start, end and the
+recognizer's confidence in it, for counting words directly or excluding a
+badly recognized stretch instead of trusting it.
+
+**Three conventions to know before analyzing.** A measure that could not be
 computed is a row with an empty value and a stated reason — never a zero, and
 never a dropped row, because a failed camera and an absence of behavior must
-not look the same. And every pair carries a quality verdict based on the
+not look the same. The wide tables have no column for the reason, so an empty
+cell there means the same thing and `counts_long.csv` says why — worth reading
+before counting rows in `nods.csv` or `events.csv` instead, because those list
+every detection, including ones from a view whose movement measures were
+withheld as unreliable. `counts.csv` is the file to count from. Counts that
+belong to the pair rather than to either person — shared laughter, mutual
+gaze, the pair's total turns — are in `counts_dyad.csv` rather than copied
+onto both participants, because a value duplicated across two rows enters a
+model as two observations when it is one. And every pair carries a quality verdict based on the
 *inputs* (sync confidence, tracking coverage, attribution certainty), not on
 whether the numbers look plausible — filtering on surprising values is how a
 real effect gets thrown away.

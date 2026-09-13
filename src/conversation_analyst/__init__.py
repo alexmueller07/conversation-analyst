@@ -20,7 +20,7 @@ import os
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("GLOG_minloglevel", "3")
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 APP_NAME = "Conversation Analyst"
 
 from conversation_analyst.config import Config

@@ -269,6 +269,49 @@ DECISIONS: tuple[Decision, ...] = (
             "Moulder et al. (2018) Psychol. Methods 23:757",
         ),
     ),
+    # ---- output shape --------------------------------------------------
+    Decision(
+        "Output",
+        "Every rate is written with its raw count beside it, and the counts "
+        "are collected again in one file with a row per participant, an "
+        "identifier to join a grouping variable onto, and the conversation "
+        "length and speaking time they accumulated over.",
+        "A rate is a count over a denominator, and dividing discards the "
+        "count: 1.4 laughs per minute is eight laughs in a six-minute "
+        "conversation and twenty-two in a sixteen-minute one, which are "
+        "different observations. Group comparisons are made on counts, so "
+        "the counts are given in the shape a group comparison needs rather "
+        "than left to be reconstructed; the exposure columns travel with "
+        "them because a raw count compared across conversations of unequal "
+        "length is a comparison of length.",
+    ),
+    Decision(
+        "Output",
+        "Counts that belong to the pair -- shared laughter, mutual gaze "
+        "episodes, the pair's total turns -- are written to their own file "
+        "rather than copied onto both participants' rows.",
+        "Dyadic data is already non-independent; a pair-level value repeated "
+        "on two rows enters a model as two observations when it is one, "
+        "which inflates the effective sample size without anything in the "
+        "table saying so.",
+        (
+            "Kenny, Kashy & Cook (2006) Dyadic Data Analysis",
+        ),
+    ),
+    Decision(
+        "Output",
+        "The transcript is written as rows -- one per utterance and one per "
+        "word -- and includes backchannels and attempts that were talked "
+        "over, each labelled, alongside the floor-holding turns.",
+        "A turn table is not the conversation: the \"mm-hm\" that kept the "
+        "speaker going and the attempt that got cut off are speech, and a "
+        "transcript that omits them misrepresents what was said. Labelling "
+        "the kinds rather than merging them keeps the three separable, and "
+        "because a backchannel is never also part of a turn the rows can be "
+        "counted without counting anything twice. Per-word recognizer "
+        "confidence travels with the words so a badly recognized stretch can "
+        "be excluded rather than trusted.",
+    ),
     # ---- validation frame --------------------------------------------------
     Decision(
         "Validation",
